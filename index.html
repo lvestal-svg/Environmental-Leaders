@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Environmental Engineers</title>
+
+<style>
+:root{
+  --bg1:#06102a;
+  --bg2:#0b2b55;
+  --panel: rgba(10,18,45,0.82);
+  --text:#eaf1ff;
+  --muted:#b7c6ff;
+  --border: rgba(234,241,255,0.18);
+  --font:22px;
+}
+body{
+  margin:0;
+  color:var(--text);
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  background:linear-gradient(180deg,var(--bg1),var(--bg2));
+}
+.wrap{max-width:1100px;margin:auto;padding:16px;}
+.grid{display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start;}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:16px;}
+button{padding:12px 14px;border-radius:12px;font-weight:800;cursor:pointer;width:100%;}
+.row{display:flex;gap:8px;margin-top:8px;}
+.targetBox,textarea{
+  font-size:var(--font);
+  line-height:1.7;
+  border-radius:12px;
+  padding:12px;
+}
+.targetBox{
+  background:rgba(0,0,0,.25);
+  white-space: pre-wrap;
+}
+textarea{
+  width:100%;
+  min-height:190px;
+  background:rgba(0,0,0,.45);
+  color:var(--text);
+  border:1px solid var(--border);
+  outline:none;
+  resize: vertical;
+}
+.small{font-size:14px;color:var(--muted);margin-top:10px;line-height:1.35;}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+
+<body>
+<div class="wrap">
+  <h1>🌎 Environmental Engineers</h1>
+  <div class="small">1-minute challenge. Type carefully (quotes, commas, numbers, ?, and !).</div>
+
+  <div class="grid" style="margin-top:14px;">
+
+    <!-- LEFT -->
+    <div class="card">
+      <div id="topicName">Paragraph: (press START)</div>
+
+      <div style="margin-top:12px">⏱️ Time left: <b id="timeLeft">1:00</b></div>
+      <div style="margin-top:10px">🎯 Accuracy: <b id="accuracy">—%</b></div>
+
+      <div style="margin-top:12px">
+        <button id="startBtn">START</button>
+      </div>
+
+      <div class="row">
+        <button id="nextBtn" disabled>Next Person →</button>
+        <button id="resetBtn">Reset</button>
+      </div>
+
+      <div class="small">
+        <b>Tip:</b> Don’t press Enter. If something looks wrong, backspace and fix it.
+      </div>
+    </div>
+
+    <!-- RIGHT -->
+    <div class="card">
+      <div style="font-weight:900;color:var(--muted);margin-bottom:8px;">Target paragraph</div>
+      <div id="targetBox" class="targetBox"></div>
+
+      <div style="font-weight:900;color:var(--muted);margin:14px 0 8px;">Your typing</div>
+      <textarea id="input" placeholder="Press START, then type here..." disabled></textarea>
+
+      <div id="liveMsg" class="small" style="margin-top:10px;">Press START to begin!</div>
+
+      <div id="resultsBox" style="display:none;margin-top:12px;">
+        <div id="finalAccuracy" style="font-weight:900;"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+/* ===== PARAGRAPHS (fixed order) ===== */
+const PARAGRAPHS = [
+  {
+    name:"John Francis",
+    text:'John Francis saw an oil spill and asked, "How can we protect the water?" He helped people care about the Earth. Engineers clean oil by testing tools that scoop, soak, or skim. If you tried 3 tools, which one would work best, and why?'
+  },
+  {
+    name:"Wangari Maathai",
+    text:'Wangari Maathai planted trees to help the land heal. She believed, "Small actions make big change!" Engineers solve problems like weak soil and erosion. Some plants grow without soil using hydroponics. Compare 2 systems: soil pots vs. a tower. Which one saves space?'
+  },
+  {
+    name:"Majora Carter",
+    text:'Majora Carter worked for cleaner air in city neighborhoods. She said, "Every place deserves to be healthy." Engineers design filters that block dust but still let air move. If your filter had 2 layers, would it work better? What would you change next?'
+  },
+  {
+    name:"Robert Bullard",
+    text:'Robert Bullard used maps and data to study pollution. He asked, "Is this fair for families?" Engineers design safer cities using rules and testing. If wind blows in one direction, how could your design protect 4 homes and 1 school?'
+  }
+];
+
+/* ===== ELEMENTS ===== */
+const startBtn   = document.getElementById("startBtn");
+const nextBtn    = document.getElementById("nextBtn");
+const resetBtn   = document.getElementById("resetBtn");
+const topicName  = document.getElementById("topicName");
+const timeLeftEl = document.getElementById("timeLeft");
+const accuracyEl = document.getElementById("accuracy");
+const targetBox  = document.getElementById("targetBox");
+const input      = document.getElementById("input");
+const liveMsg    = document.getElementById("liveMsg");
+const resultsBox = document.getElementById("resultsBox");
+const finalAccuracy = document.getElementById("finalAccuracy");
+
+/* ===== TIMER ===== */
+const TOTAL_SECONDS = 60;
+let seconds = TOTAL_SECONDS;
+let timer = null;
+let running = false;
+
+/* ===== STATE ===== */
+let currentIndex = 0;
+let current = null;
+let typed = "";
+
+/* ===== NORMALIZATION (quotes + whitespace) ===== */
+function normalizeText(s){
+  return (s ?? "")
+    .replace(/[“”]/g, '"')
+    .replace(/[’]/g, "'")
+    .replace(/\u00A0/g, " ")
+    .replace(/\r?\n/g, " ");
+}
+
+function formatTime(s){
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
+/* ===== EDIT DISTANCE (Levenshtein) =====
+   This prevents “one missed character” from wrecking the whole score. */
+function editDistance(a, b){
+  const n = a.length, m = b.length;
+  if(n === 0) return m;
+  if(m === 0) return n;
+
+  // Use two rows to keep it fast
+  let prev = new Array(m + 1);
+  let curr = new Array(m + 1);
+
+  for(let j=0;j<=m;j++) prev[j] = j;
+
+  for(let i=1;i<=n;i++){
+    curr[0] = i;
+    const ai = a.charCodeAt(i-1);
+    for(let j=1;j<=m;j++){
+      const cost = (ai === b.charCodeAt(j-1)) ? 0 : 1;
+      curr[j] = Math.min(
+        prev[j] + 1,      // delete
+        curr[j-1] + 1,    // insert
+        prev[j-1] + cost  // substitute
+      );
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[m];
+}
+
+function loadParagraph(i){
+  currentIndex = i;
+  current = PARAGRAPHS[i];
+
+  topicName.textContent = `Paragraph: ${current.name}`;
+  targetBox.textContent = current.text;
+
+  typed = "";
+  input.value = "";
+  input.disabled = true;
+
+  accuracyEl.textContent = "—%";
+  seconds = TOTAL_SECONDS;
+  timeLeftEl.textContent = formatTime(seconds);
+
+  nextBtn.disabled = true;
+  startBtn.disabled = false;
+
+  resultsBox.style.display = "none";
+  liveMsg.textContent = "Press START when you're ready!";
+}
+
+/* ===== ACCURACY (edit-distance based) ===== */
+function calcAccuracy(){
+  const target = normalizeText(current.text);
+
+  // Normalize typed, and ignore *extra* characters beyond the target length.
+  // (Extra trailing spaces won’t destroy the score.)
+  const userRaw = normalizeText(typed);
+  const user = userRaw.slice(0, target.length);
+
+  if(target.length === 0) return 100;
+  if(user.length === 0) return 0;
+
+  const dist = editDistance(user, target);
+
+  // Similarity score
+  const score = Math.max(0, 1 - (dist / target.length));
+  return Math.round(score * 100);
+}
+
+function startRound(){
+  if(!current) loadParagraph(0);
+
+  running = true;
+  seconds = TOTAL_SECONDS;
+  timeLeftEl.textContent = formatTime(seconds);
+
+  typed = "";
+  input.value = "";
+  input.disabled = false;
+  input.focus();
+
+  startBtn.disabled = true;
+  nextBtn.disabled = true;
+  resetBtn.disabled = true;
+
+  resultsBox.style.display = "none";
+  liveMsg.textContent = "Go! Type exactly what you see.";
+
+  clearInterval(timer);
+  timer = setInterval(() => {
+    seconds--;
+    timeLeftEl.textContent = formatTime(seconds);
+    if(seconds <= 0) endRound();
+  }, 1000);
+}
+
+function endRound(){
+  running = false;
+  clearInterval(timer);
+  timer = null;
+
+  input.disabled = true;
+  resetBtn.disabled = false;
+  startBtn.disabled = false;
+
+  const acc = calcAccuracy();
+  accuracyEl.textContent = acc + "%";
+
+  resultsBox.style.display = "block";
+  finalAccuracy.textContent = `Final accuracy: ${acc}%`;
+
+  if(currentIndex < PARAGRAPHS.length - 1){
+    nextBtn.disabled = false;
+    liveMsg.textContent = "Nice! Click NEXT for the next person, or START to try again.";
+  }else{
+    nextBtn.disabled = true;
+    liveMsg.textContent = "You finished all 4 people! Press START to practice again.";
+  }
+}
+
+function goNext(){
+  if(running) return;
+  if(currentIndex < PARAGRAPHS.length - 1){
+    loadParagraph(currentIndex + 1);
+  }
+}
+
+/* ===== EVENTS ===== */
+startBtn.addEventListener("click", startRound);
+nextBtn.addEventListener("click", goNext);
+
+resetBtn.addEventListener("click", () => {
+  clearInterval(timer);
+  timer = null;
+  running = false;
+  resetBtn.disabled = false;
+  loadParagraph(0);
+  topicName.textContent = "Paragraph: (press START)";
+  liveMsg.textContent = "Press START to begin!";
+});
+
+// Prevent Enter/newline
+input.addEventListener("keydown", (e) => {
+  if(e.key === "Enter"){
+    e.preventDefault();
+  }
+});
+
+input.addEventListener("input", () => {
+  typed = normalizeText(input.value);
+
+  // Keep textbox normalized (helps pasted curly quotes)
+  if(input.value !== typed){
+    const pos = input.selectionStart;
+    input.value = typed;
+    input.selectionStart = input.selectionEnd = pos;
+  }
+
+  // Live accuracy
+  if(running){
+    accuracyEl.textContent = calcAccuracy() + "%";
+  }
+
+  // Finish early if they reach target length
+  const targetLen = normalizeText(current.text).length;
+  if(running && typed.length >= targetLen){
+    endRound();
+  }
+});
+
+/* ===== INIT ===== */
+loadParagraph(0);
+</script>
+</body>
+</html>
